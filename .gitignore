@@ -1,0 +1,53 @@
+# =========================
+# Assignment brief — do not commit (spec requirement)
+# =========================
+project_requirements.md
+TIME_AI_Innovation_TakeHome_Recontract_Pitch.docx
+TIME_AI_Innovation_TakeHome_Recontract_Pitch.docx.pdf
+
+# =========================
+# Environment / Secrets
+# =========================
+.env
+.env.local
+.env.*.local
+*.env
+
+# =========================
+# Backend (Python / FastAPI)
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+backend/venv/
+backend/.venv/
+backend/env/
+backend/*.db
+backend/*.sqlite
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+
+# =========================
+# Frontend (Next.js)
+# =========================
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel/
+frontend/coverage/
+
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
