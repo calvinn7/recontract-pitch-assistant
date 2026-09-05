@@ -1,6 +1,6 @@
 # TIME Recontract Pitch Assistant
 
-An internal tool for TIME dotcom retention agents. Select a customer nearing contract end, generate a personalised AI-written pitch, and deliver it during the recontract call.
+TIME sells fibre broadband on 24-month contracts, and today recontract calls run off a spreadsheet and improvisation. This is an internal tool for retention agents: select a customer nearing contract end, generate a personalised AI-written pitch, and deliver it during the call.
 
 **Live Demo:** [https://recontract-pitch-assistant.vercel.app/](https://recontract-pitch-assistant.vercel.app/)
 
@@ -17,6 +17,17 @@ An internal tool for TIME dotcom retention agents. Select a customer nearing con
 **Pitch feedback** — Each pitch card shows a **👍 Used on call** / **👎 Dismiss** button while the pitch is pending. Clicking either fires `PATCH /api/v1/retention/drafts/{draft_id}/status` and persists the signal. Status renders as a badge. The intention is to build a ground-truth dataset over time — high dismiss rates on a particular customer profile signal a prompt that needs work.
 
 **Retry with exponential backoff** — The Gemini call retries automatically on rate-limit (429) errors: immediately, then after 2 s, then after 4 s. If all three attempts fail the client gets a 429. Timeouts (>30 s) are not retried and surface as 503 immediately.
+
+---
+
+## Assumptions
+ 
+The brief invites a reasonable call on anything ambiguous, noted here rather than left implicit:
+ 
+- **No agent authentication.** Single shared view for now — scoped out deliberately to keep the take-home focused on the generation pipeline, not a login system. See "What I'd add next."
+- **Gemini's free tier is acceptable.** The brief says a free tier or small local model is fine since the model itself isn't being graded.
+- **`pitch_drafts.status` is an addition beyond the spec's schema.** `customers.json` and the `account_records` fields it maps to are untouched.
+- **Seeding is one-time and idempotent.** The backend checks for existing rows before inserting, so restarting or redeploying never duplicates the 20 customers.
 
 ---
 
@@ -71,8 +82,18 @@ Create `.env` in the project root — this file is gitignored:
 ```env
 GOOGLE_API_KEY=your_gemini_api_key
 GOOGLE_MODEL=gemini-2.5-flash
-DATABASE_URL=postgresql+asyncpg://postgres:<password>@db.<ref>.supabase.co:5432/postgres
+ 
+# Option A — Supabase Postgres (what the deployed version uses)
+# Supabase requires SSL — the ?ssl=require suffix matters, the app will
+# fail to connect without it.
+DATABASE_URL=postgresql+asyncpg://postgres:<password>@db.<ref>.supabase.co:5432/postgres?ssl=require
+ 
+# Option B — SQLite (zero setup, no Supabase account needed)
+# DATABASE_URL=sqlite+aiosqlite:///./app.db
 ```
+
+The async engine handles both drivers transparently — switching is this one line, no code changes. If you use SQLite, add `aiosqlite` to `requirements.txt` (already listed there as an optional dependency).
+
 
 ### 2. Start the backend
 
@@ -145,7 +166,7 @@ Open `http://localhost:3000`. The frontend reads `NEXT_PUBLIC_API_URL` from `fro
 
 ## How I used AI tools
 
-As requested in the brief, here is an honest, detailed breakdown of how I used AI (specifically an agentic coding assistant) to build this project. I operated as the **architect and reviewer**, while treating the AI as a **junior developer** writing the boilerplate.
+As requested in the brief, here is an honest, detailed breakdown of how I used AI to build this project. I used Gemini through Google's Antigravity agentic coding environment. I operated as the **architect and reviewer**, while treating the AI as a **junior developer** writing the boilerplate.
 
 ### What I did (The Human / Architect)
 
