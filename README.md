@@ -2,6 +2,8 @@
 
 An internal tool for TIME dotcom retention agents. Select a customer nearing contract end, generate a personalised AI-written pitch, and deliver it during the recontract call.
 
+**Live Demo:** [https://recontract-pitch-assistant.vercel.app/](https://recontract-pitch-assistant.vercel.app/)
+
 ---
 
 ## What's built
@@ -143,10 +145,22 @@ Open `http://localhost:3000`. The frontend reads `NEXT_PUBLIC_API_URL` from `fro
 
 ## How I used AI tools
 
-This project was built with **Google Antigravity** (AI coding assistant).
+As requested in the brief, here is an honest, detailed breakdown of how I used AI (specifically an agentic coding assistant) to build this project. I operated as the **architect and reviewer**, while treating the AI as a **junior developer** writing the boilerplate.
 
-**What I delegated to the AI:** generating boilerplate (FastAPI router structure, SQLAlchemy model definitions, Next.js component scaffolding, Tailwind layout), running dependency installs, executing smoke-test commands against the live API.
+### What I did (The Human / Architect)
 
-**What I did myself / directed precisely:** all architecture decisions — async SQLAlchemy over sync, Supabase over SQLite, native `response_schema` mode over prompt-only JSON (and understanding the tradeoff: no streaming, but zero malformed-JSON retries), the system-prompt design (role framing, exact plan strings, per-field rules, churn signal interpretation), error categorisation (which codes go where, what to retry vs not), and all naming conventions required by the spec (`account_records`, `POST /api/v1/retention/drafts`).
+- **System Design & Tradeoffs:** I made the core architectural decisions. I chose FastAPI with `asyncio` to prevent I/O blocking during long LLM calls. I chose PostgreSQL on Supabase over SQLite so it would survive ephemeral deployments on Railway. 
+- **LLM Engineering Strategy:** I explicitly decided to use Gemini's `response_schema` feature to force native JSON output. I weighed the tradeoff: losing streaming UI capability, but gaining a 100% guarantee against malformed JSON (which eliminates complex regex parsing and retry logic). 
+- **Error Handling & Resilience:** I designed the failure modes. I instructed the AI *how* to handle specific exceptions: mapping timeouts to 503s, Pydantic validation errors to 502s, and building the exponential backoff retry loop specifically for 429 Rate Limits.
+- **Prompt Engineering:** I designed the system prompt, identifying the specific rules (e.g., negative days meaning out of contract, auto-renew declines as churn flags) and forcing exact strings for plan names.
+- **Debugging & Deployment:** I handled the environment configuration, solved the Supabase SSL requirement (`?ssl=require`) for the Railway deployment, fixed a Pydantic `model_` namespace conflict the AI introduced, and corrected the SQLAlchemy metadata import order so tables would actually create on startup.
 
-**How I verified:** read every generated file before approving it; manually tested all five endpoints with real payloads; confirmed Pydantic rejects invalid plan names before any DB write; confirmed Supabase persistence end-to-end by calling the history endpoint immediately after pitch generation.
+### What the AI did (The Assistant)
+
+- **Boilerplate & Scaffolding:** Generated the initial Next.js App Router folder structure, the FastAPI file layout, and the `requirements.txt` / `package.json` dependencies.
+- **Data Translation:** Converted the Python SQLAlchemy/Pydantic schemas into matching TypeScript interfaces (`types/index.ts`).
+- **UI & Tailwind CSS:** Wrote the tedious Tailwind utility classes for the React components (like the `CustomerCard` grid, urgency badges, and history panel layout) based on my wireframe descriptions.
+- **CRUD Operations:** Generated the standard `select()` queries for SQLAlchemy based on the data models.
+- **Seeding Script:** Wrote the JSON file parser (`seed.py`) to inject `customers.json` into the database, handling edge cases like stripping out `"None"` string artifacts.
+
+**Verification:** I read every file the AI generated, manually tested all five API endpoints with Edge cases (like invalid plans), and confirmed the database persistence end-to-end. Nothing was merged blindly.
