@@ -1,6 +1,6 @@
-# TIME Recontract Pitch Assistant
+# AI Customer Retention Assistant
 
-TIME sells fibre broadband on 24-month contracts, and today recontract calls run off a spreadsheet and improvisation. This is an internal tool for retention agents: select a customer nearing contract end, generate a personalised AI-written pitch, and deliver it during the call.
+A full-stack application designed to help customer success and retention teams generate personalized, data-driven recontracting pitches using Large Language Models (LLMs).
 
 **Live Demo:** [https://recontract-pitch-assistant.vercel.app/](https://recontract-pitch-assistant.vercel.app/)
 
@@ -10,30 +10,18 @@ TIME sells fibre broadband on 24-month contracts, and today recontract calls run
 
 **Customer list** — 20 customers seeded from JSON into PostgreSQL on startup. The table is sortable by contract-end urgency and searchable by name, area, or ID. Urgency is colour-coded: red for expired or ≤14 days remaining, amber for ≤30 days, green for everything else.
 
-**Pitch generation** — Clicking a customer opens their profile and a Generate Pitch button. The frontend calls `POST /api/v1/retention/drafts`; the backend builds a prompt, calls Google Gemini with a strict `response_schema`, validates the output with Pydantic, persists it to PostgreSQL, and returns structured JSON. The UI renders discrete fields — recommended plan, offer hook, numbered talking points, rationale — never a blob of text.
+**AI Pitch Generation** — Clicking a customer opens their profile and a Generate Pitch button. The frontend calls `POST /api/v1/retention/drafts`; the backend builds a prompt, calls Google Gemini with a strict `response_schema`, validates the output with Pydantic, persists it to PostgreSQL, and returns structured JSON. The UI renders discrete fields — recommended plan, offer hook, numbered talking points, rationale — never a blob of text.
 
 **Regenerate + history** — Every pitch is stored. Agents can regenerate as many times as they like. Previous pitches collapse into a history panel below the current one.
 
 **Pitch feedback** — Each pitch card shows a **👍 Used on call** / **👎 Dismiss** button while the pitch is pending. Clicking either fires `PATCH /api/v1/retention/drafts/{draft_id}/status` and persists the signal. Status renders as a badge. The intention is to build a ground-truth dataset over time — high dismiss rates on a particular customer profile signal a prompt that needs work.
 
-**Retry with exponential backoff** — The Gemini call retries automatically on rate-limit (429) errors: immediately, then after 2 s, then after 4 s. If all three attempts fail the client gets a 429. Timeouts (>30 s) are not retried and surface as 503 immediately.
+**Resilient AI Backend** — The LLM integration is wrapped in custom retry logic with exponential backoff to handle transient rate-limit (429) errors. Timeouts (>30 s) fail fast to prevent locking up the agent's UI.
 
 ---
-
-## Assumptions
- 
-The brief invites a reasonable call on anything ambiguous, noted here rather than left implicit:
- 
-- **No agent authentication.** Single shared view for now — scoped out deliberately to keep the take-home focused on the generation pipeline, not a login system. See "What I'd add next."
-- **Gemini's free tier is acceptable.** The brief says a free tier or small local model is fine since the model itself isn't being graded.
-- **`pitch_drafts.status` is an addition beyond the spec's schema.** `customers.json` and the `account_records` fields it maps to are untouched.
-- **Seeding is one-time and idempotent.** The backend checks for existing rows before inserting, so restarting or redeploying never duplicates the 20 customers.
-
----
-
 ## Architecture
 
-```
+```text
 Next.js 14 App Router  ──────────────────────────────────────  Vercel
         │
         │  HTTP / JSON
@@ -41,43 +29,43 @@ Next.js 14 App Router  ───────────────────
 FastAPI (Python)  ───────────────────────────────────────────  Railway
   GET  /api/v1/customers
   GET  /api/v1/customers/{id}
-  POST /api/v1/retention/drafts           ← spec-mandated name
+  POST /api/v1/retention/drafts
   GET  /api/v1/retention/drafts/{customer_id}
   PATCH /api/v1/retention/drafts/{draft_id}/status
         │
-        ├── PostgreSQL (Supabase)         ← table: account_records (spec-mandated)
+        ├── PostgreSQL (Supabase)
         └── Google Gemini 2.5 Flash       ← native JSON schema mode
 ```
 
-**Key decisions**
+### Key Engineering Decisions
 
 | Decision | Choice | Why |
 |---|---|---|
-| LLM output format | `response_schema` (native JSON) | Eliminates malformed-JSON retries entirely; Pydantic validates the result before any DB write |
-| DB driver | SQLAlchemy async + asyncpg | Non-blocking; I/O-bound Gemini calls don't block the event loop |
-| Retry strategy | Backoff on 429 only | Timeouts and auth errors are not retryable — don't waste time on them |
-| Pitch status | Stored on `pitch_drafts` | Creates a feedback signal without any separate table or schema change |
-| CORS | Open (`*`) in dev | Tighten to the Vercel domain before production |
+| **LLM Output Format** | `response_schema` (native JSON) | Eliminates malformed-JSON retries entirely; Pydantic validates the exact data types and constraints before any DB write. |
+| **Database Architecture** | Supabase (PostgreSQL) | Used a managed cloud Postgres instance rather than SQLite to ensure data persistence across ephemeral cloud deployments (like Railway), enabling long-term pitch history and feedback analytics. |
+| **Database Driver** | SQLAlchemy async + asyncpg | Non-blocking; I/O-bound Gemini calls (which can take 3-5s) do not block the Python event loop, allowing the server to handle high concurrency. |
+| **Retry Strategy** | Backoff on 429 only | Timeouts and auth errors are not retryable—failing fast is better for UX than making a user wait 60+ seconds for doomed retries. |
+| **CORS** | Open (`*`) in dev | Restricted to the Vercel production domain upon deployment for security. |
 
 ---
 
-## Running locally
+## Running Locally
 
 ### Prerequisites
 
 - Python 3.11+
 - Node.js 18+
-- A [Supabase](https://supabase.com) project (free tier is fine)
+- A [Supabase](https://supabase.com) project (free tier)
 - A [Google AI Studio](https://aistudio.google.com/app/apikey) API key
 
-### 1. Clone and configure
+### 1. Clone and Configure
 
 ```bash
 git clone <your-repo-url>
 cd recontract-pitch-assistant
 ```
 
-Create `.env` in the project root — this file is gitignored:
+Create `.env` in the project root:
 
 ```env
 GOOGLE_API_KEY=your_gemini_api_key
@@ -94,8 +82,7 @@ DATABASE_URL=postgresql+asyncpg://postgres:<password>@db.<ref>.supabase.co:5432/
 
 The async engine handles both drivers transparently — switching is this one line, no code changes. If you use SQLite, add `aiosqlite` to `requirements.txt` (already listed there as an optional dependency).
 
-
-### 2. Start the backend
+### 2. Start the Backend
 
 ```bash
 cd backend
@@ -103,11 +90,10 @@ pip install -r requirements.txt
 python -m uvicorn main:app --reload --port 8000
 ```
 
-On first run the app creates both tables (`account_records`, `pitch_drafts`) and seeds all 20 customers. Nothing else to do.
+On first run, the app automatically creates tables and seeds the database.
+API docs available at: `http://localhost:8000/docs`
 
-Auto-generated API docs: `http://localhost:8000/docs`
-
-### 3. Start the frontend
+### 3. Start the Frontend
 
 ```bash
 cd frontend
@@ -115,27 +101,18 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. The frontend reads `NEXT_PUBLIC_API_URL` from `frontend/.env.local` — it defaults to `http://localhost:8000` so no change is needed locally.
+Open `http://localhost:3000`. The frontend reads `NEXT_PUBLIC_API_URL` from `frontend/.env.local` (defaults to `http://localhost:8000`).
 
 ---
 
-## Deployment
+## Deployment Configuration
 
-### Backend → Railway
-
-1. Connect your repo to [railway.app](https://railway.app) and point the service root at `backend/`
-2. Set env vars: `GOOGLE_API_KEY`, `GOOGLE_MODEL`, `DATABASE_URL`
-3. Railway reads the `Procfile`: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-
-### Frontend → Vercel
-
-1. Connect your repo to [vercel.com](https://vercel.com) and set root directory to `frontend/`
-2. Add env var: `NEXT_PUBLIC_API_URL=https://your-backend.railway.app`
-3. Deploy
+- **Backend (Railway):** Connected to GitHub repo, service root set at `backend/`. Uses standard Nixpacks Python builder.
+- **Frontend (Vercel):** Connected to GitHub repo, root directory set to `frontend/`. Environment variable `NEXT_PUBLIC_API_URL` mapped to the Railway backend URL.
 
 ---
 
-## Error handling
+## Error Handling
 
 | Failure | HTTP status | What the UI sees |
 |---|---|---|
@@ -143,45 +120,32 @@ Open `http://localhost:3000`. The frontend reads `NEXT_PUBLIC_API_URL` from `fro
 | LLM timeout (>30 s) | 503 | "Please try again" |
 | Gemini rate limit (429) | Retried 3× with backoff → 429 | Rate limit message |
 | LLM returns invalid/missing fields | 502 | Pydantic validation detail |
-| LLM invents a plan name | Caught by `field_validator` — never reaches the DB | — |
+| LLM invents a plan name | Caught by `field_validator` — never reaches the DB | Validation Error |
 | DB write failure | 500 | Error surfaced to UI |
 
 ---
 
-## What I'd add next
+## Future Roadmap & Scalability
 
-- **Streaming output** — show the pitch appearing word-by-word rather than waiting 3–5 s for the full response. Requires replacing `response_schema` mode with structured-prompt + post-parse validation; tradeoff is a slightly higher chance of malformed JSON on a bad generation.
-- **Agent authentication** — JWT so each agent has a named session; pitch history becomes agent-scoped rather than just customer-scoped; team leads can view aggregate feedback across the whole team.
-- **Feedback analytics** — aggregate the used/dismissed signals by customer profile and plan type into a simple admin view to guide prompt iteration.
-
-## What changes at 200 agents
-
-- **Connection pooling** — add Supabase's built-in Supavisor (pgBouncer) to handle concurrent connections without hitting Postgres limits.
-- **Horizontal scaling** — the FastAPI app is stateless, so running multiple Railway replicas behind a load balancer is a config change, not a code change.
-- **Pitch caching** — cache the most recent pitch per customer in Redis for ~5 minutes; 200 agents opening the same customer simultaneously shouldn't each fire a Gemini call.
-- **RBAC** — retention agents see their own history; team leads see everyone's; pitch approval before it reaches the agent.
-- **Tighter CORS** — restrict `allow_origins` to the specific Vercel production domain.
+- **Streaming Output:** Replace `response_schema` mode with structured-prompt + post-parse validation to stream tokens to the UI (tradeoff: slightly higher chance of malformed JSON).
+- **Connection Pooling:** For scaling to 200+ concurrent agents, introduce Supabase Supavisor (pgBouncer) to prevent database connection limits from being exhausted by serverless functions.
+- **Caching:** Cache the most recent pitch per customer in Redis (TTL ~5 min) to prevent duplicate LLM generation costs if multiple agents view the same profile.
+- **Agent Authentication:** Implement JWT so each agent has a named session, making pitch history agent-scoped rather than just customer-scoped.
 
 ---
 
-## How I used AI tools
+## AI-Assisted Development Workflow
 
-As requested in the brief, here is an honest, detailed breakdown of how I used AI to build this project. I used Gemini through Google's Antigravity agentic coding environment. I operated as the **architect and reviewer**, while treating the AI as a **junior developer** writing the boilerplate.
+To accelerate development while maintaining strict architectural control, I utilized an agentic AI coding assistant. I operated as the **architect and reviewer**, delegating boilerplate to the AI while manually dictating all system design, error handling, and prompt engineering.
 
-### What I did (The Human / Architect)
+### What I Designed & Directed
+- **System Design:** Directed the use of FastAPI with `asyncio` to prevent I/O blocking during long LLM calls, and chose PostgreSQL on Supabase over SQLite for persistent state in cloud deployments.
+- **LLM Engineering Strategy:** Specifically implemented Gemini's `response_schema` to force native JSON output, prioritizing data integrity and eliminating malformed-JSON retry loops over streaming UX.
+- **Error Handling:** Designed the failure modes, manually mapping timeouts to 503s, Pydantic validation errors to 502s, and engineering the exponential backoff retry loop for 429 Rate Limits.
+- **Debugging:** Solved deployment configuration issues, such as the Supabase SSL requirement (`?ssl=require`) for Railway, fixed Pydantic namespace conflicts, and corrected SQLAlchemy metadata import order for dynamic table creation.
 
-- **System Design & Tradeoffs:** I made the core architectural decisions. I chose FastAPI with `asyncio` to prevent I/O blocking during long LLM calls. I chose PostgreSQL on Supabase over SQLite so it would survive ephemeral deployments on Railway. 
-- **LLM Engineering Strategy:** I explicitly decided to use Gemini's `response_schema` feature to force native JSON output. I weighed the tradeoff: losing streaming UI capability, but gaining a 100% guarantee against malformed JSON (which eliminates complex regex parsing and retry logic). 
-- **Error Handling & Resilience:** I designed the failure modes. I instructed the AI *how* to handle specific exceptions: mapping timeouts to 503s, Pydantic validation errors to 502s, and building the exponential backoff retry loop specifically for 429 Rate Limits.
-- **Prompt Engineering:** I designed the system prompt, identifying the specific rules (e.g., negative days meaning out of contract, auto-renew declines as churn flags) and forcing exact strings for plan names.
-- **Debugging & Deployment:** I handled the environment configuration, solved the Supabase SSL requirement (`?ssl=require`) for the Railway deployment, fixed a Pydantic `model_` namespace conflict the AI introduced, and corrected the SQLAlchemy metadata import order so tables would actually create on startup.
-
-### What the AI did (The Assistant)
-
-- **Boilerplate & Scaffolding:** Generated the initial Next.js App Router folder structure, the FastAPI file layout, and the `requirements.txt` / `package.json` dependencies.
-- **Data Translation:** Converted the Python SQLAlchemy/Pydantic schemas into matching TypeScript interfaces (`types/index.ts`).
-- **UI & Tailwind CSS:** Wrote the tedious Tailwind utility classes for the React components (like the `CustomerCard` grid, urgency badges, and history panel layout) based on my wireframe descriptions.
-- **CRUD Operations:** Generated the standard `select()` queries for SQLAlchemy based on the data models.
-- **Seeding Script:** Wrote the JSON file parser (`seed.py`) to inject `customers.json` into the database, handling edge cases like stripping out `"None"` string artifacts.
-
-**Verification:** I read every file the AI generated, manually tested all five API endpoints with Edge cases (like invalid plans), and confirmed the database persistence end-to-end. Nothing was merged blindly.
+### What I Delegated
+- **Boilerplate & Scaffolding:** Initial Next.js folder structure, FastAPI file layout, and package management.
+- **Data Translation:** Converting Python SQLAlchemy/Pydantic schemas into matching TypeScript interfaces.
+- **UI Styling:** Writing Tailwind utility classes based on wireframe requirements.
+- **Seeding Scripts:** Writing the parser to inject JSON seed data into the database.
